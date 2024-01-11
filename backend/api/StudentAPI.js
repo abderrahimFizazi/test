@@ -1,11 +1,32 @@
 const express = require("express");
 const Student = require("../model/Student");
+const { Op } = require('sequelize');
+
 const router = express.Router();
 
 router.get('/', async (req, res)=> {
   try{
-    const students = await Student.findAll();
-    res.status(200).json(students);
+
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 5;
+
+    const offset = (page - 1) * pageSize;
+    
+    const students = await Student.findAndCountAll({
+      limit: pageSize,
+      offset: offset,
+    });
+    
+    const transformedStudents = students.rows.map(student => ({
+      id: student.id,
+      fullname: `${student.firstname} ${student.lastname}`,
+      age: calculateAge(student.date_of_birth), 
+      email: student.email,
+    }));
+
+    res.status(200).json({
+      data: transformedStudents,
+    });
 
   }
   catch (error) {
@@ -27,15 +48,61 @@ router.get('/pagination', async (req, res) => {
       offset: offset,
     });
 
+    const transformedStudents = students.rows.map(student => ({
+      id: student.id,
+      fullname: `${student.firstname} ${student.lastname}`,
+      age: calculateAge(student.date_of_birth), 
+      email: student.email,
+    }));
+
     res.status(200).json({
       page: page,
       pageSize: pageSize,
       totalStudents: students.count,
       totalPages: Math.ceil(students.count / pageSize),
-      data: students.rows,
+      data: transformedStudents,
     });
   } catch (error) {
     console.error('Error fetching students:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+function calculateAge(dateOfBirth) {
+
+  const birthYear = new Date(dateOfBirth).getFullYear();
+  const currentYear = new Date().getFullYear();
+  return currentYear - birthYear;
+}
+
+router.get('/search', async (req, res) => {
+  try {
+    const name = req.query.name;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Search query parameter name is required.' });
+    }
+
+    const students = await Student.findAll({
+      where: {
+        [Op.or]: [
+          {
+            firstname: {
+              [Op.iLike]: `%${name}%`,
+            },
+          },
+          {
+            lastname: {
+              [Op.iLike]: `%${name}%`,
+            },
+          },
+        ],
+      },
+    });
+
+    res.status(200).json(students);
+  } catch (error) {
+    console.error('Error searching students:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -115,5 +182,7 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ error: 'Error updating Student:' + error });
   }
 });
+
+
 
 module.exports = router;
